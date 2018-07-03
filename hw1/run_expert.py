@@ -17,6 +17,7 @@ import roboschool
 import gym
 import load_policy
 
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -39,28 +40,28 @@ def main():
         env = gym.make(args.envname)
         max_steps = args.max_timesteps or env.spec.timestep_limit
 
-        def run_exp(func, returns, observations, actions, bc = False):
+        def run_exp(func, returns, observations, actions, bc=False):
             for i in range(args.num_rollouts):
-                print('iter', i)
+                #print('iter', i)
                 obs = env.reset()
                 done = False
                 totalr = 0.
                 steps = 0
                 while not done:
-                    action = func(obs[None,:])
-                    if steps % 1000 == 0:
-                        print(type(action))
+                    action = func(obs[None, :])
+                    #if steps % 1000 == 0:
+                    #    print(type(action))
                     observations.append(obs)
                     obs, r, done, _ = env.step(action)
                     if bc:
-                        action = policy_fn(obs[None,:])
+                        action = policy_fn(obs[None, :])
                     actions.append(action)
                     totalr += r
                     steps += 1
                     if args.render:
                         env.render()
-                    if steps % 100 == 0:
-                         print("%i/%i"%(steps, max_steps))
+                    #if steps % 100 == 0:
+                    #    print("%i/%i" % (steps, max_steps))
                     if steps >= max_steps:
                         break
                 returns.append(totalr)
@@ -72,18 +73,20 @@ def main():
         returns0 = []
         observations0 = []
         actions0 = []
+        print("running expert steps")
         run_exp(policy_fn, returns0, observations0, actions0)
 
         expert_data = {'observations': np.array(observations0),
                        'actions': np.array(actions0)}
-        actions = expert_data['actions']
-        actions_size = actions.shape[0]
-        actions_dims = actions.shape[1] * actions.shape[2]
+        actions1 = expert_data['actions']
+        actions_size = actions1.shape[0]
+        actions_dims = actions1.shape[1] * actions1.shape[2]
         expert_data['actions'] = np.reshape(expert_data['actions'], (actions_size, actions_dims))
 
         #
         print(expert_data['observations'].shape, expert_data['actions'].shape)
-        inputs = tf_util.get_placeholder('inputs', tf.float32, [None, expert_data['observations'].shape[1]])
+        inputs = tf_util.get_placeholder('inputs', tf.float32,
+                                         [None, expert_data['observations'].shape[1]])
         labels = tf_util.get_placeholder('labels', tf.float32, [None, actions_dims])
 
         # models
@@ -93,7 +96,7 @@ def main():
         d3 = tf_util.wndense(d2, 8, 'd2')
         pred = tf_util.densenobias(d3, actions_dims, 'output')
 
-        print(type(expert_data['actions']), type(pred))
+        #print(type(expert_data['actions']), type(pred))
         loss_func = tf.losses.mean_squared_error(labels, pred)
         loss = tf.reduce_mean(loss_func)
         optimizer = tf.train.RMSPropOptimizer(0.1).minimize(loss)
@@ -109,18 +112,22 @@ def main():
             for j in range(batch_num):
                 start = batch_num * j
                 end = start + batch_size
-                op_eval, ls_current = tf_util.eval([optimizer, loss], {inputs: expert_data['observations'][start:end],labels:
-            expert_data['actions'][start:end]})
+                op_eval, ls_current = tf_util.eval([optimizer, loss],
+                                                   {inputs: expert_data['observations'][start:end],
+                                                    labels: expert_data['actions'][start:end]})
                 # print('batch ', j, ls_current)
                 ls += ls_current
-            print('iter ', i, ls)
+            #print('iter ', i, ls.shape)
+
         def model_eval(obs):
             p = tf_util.eval([pred], {inputs: obs})
             return np.array(p)
 
+        print("running behaviour cloning")
         run_exp(model_eval, [], [], [])
 
-        # run_exp(model_eval, [], observations, actions, True)
+        print("running DAgger")
+        run_exp(model_eval, [], observations0, actions0, True)
 
 
 if __name__ == '__main__':
