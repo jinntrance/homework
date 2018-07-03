@@ -59,7 +59,8 @@ def main():
                     steps += 1
                     if args.render:
                         env.render()
-                    # if steps % 100 == 0: print("%i/%i"%(steps, max_steps))
+                    if steps % 100 == 0:
+                         print("%i/%i"%(steps, max_steps))
                     if steps >= max_steps:
                         break
                 returns.append(totalr)
@@ -68,30 +69,32 @@ def main():
             print('mean return', np.mean(returns))
             print('std of return', np.std(returns))
 
-        returns = []
-        observations = []
-        actions = []
-        run_exp(policy_fn, returns, observations, actions)
+        returns0 = []
+        observations0 = []
+        actions0 = []
+        run_exp(policy_fn, returns0, observations0, actions0)
 
-        expert_data = {'observations': np.array(observations),
-                       'actions': np.array(actions)}
-        actions_size = expert_data['actions'].shape[0]
-        expert_data['actions'] = np.reshape(expert_data['actions'], (actions_size, expert_data['actions'].shape[1] * expert_data['actions'].shape[2]) )
+        expert_data = {'observations': np.array(observations0),
+                       'actions': np.array(actions0)}
+        actions = expert_data['actions']
+        actions_size = actions.shape[0]
+        actions_dims = actions.shape[1] * actions.shape[2]
+        expert_data['actions'] = np.reshape(expert_data['actions'], (actions_size, actions_dims))
 
         #
         print(expert_data['observations'].shape, expert_data['actions'].shape)
         inputs = tf_util.get_placeholder('inputs', tf.float32, [None, expert_data['observations'].shape[1]])
-        labels = tf_util.get_placeholder('labels', tf.float32, [None, expert_data['actions'].shape[1]])
+        labels = tf_util.get_placeholder('labels', tf.float32, [None, actions_dims])
 
         # models
         name = args.envname
         d1 = tf_util.dense(inputs, 8, 'd1')
         d2 = tf_util.dropout(d1, 0.8)
-        d3 = tf_util.wndense(d2, 8 , 'd2')
-        pred = tf_util.densenobias(d3, expert_data['actions'].shape[1], 'output')
+        d3 = tf_util.wndense(d2, 8, 'd2')
+        pred = tf_util.densenobias(d3, actions_dims, 'output')
 
-        print(type(actions), type(pred))
-        loss_func = tf.losses.mean_squared_error(actions, pred)
+        print(type(expert_data['actions']), type(pred))
+        loss_func = tf.losses.mean_squared_error(labels, pred)
         loss = tf.reduce_mean(loss_func)
         optimizer = tf.train.RMSPropOptimizer(0.1).minimize(loss)
 
@@ -107,10 +110,10 @@ def main():
                 start = batch_num * j
                 end = start + batch_size
                 op_eval, ls_current = tf_util.eval([optimizer, loss], {inputs: expert_data['observations'][start:end],labels:
-            expert_data['actions'][start:end] })
+            expert_data['actions'][start:end]})
                 # print('batch ', j, ls_current)
                 ls += ls_current
-            print('iter ', i, ls/batch_num)
+            print('iter ', i, ls)
         def model_eval(obs):
             p = tf_util.eval([pred], {inputs: obs})
             return np.array(p)
