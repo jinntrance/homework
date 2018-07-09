@@ -13,7 +13,6 @@ import pickle
 import tensorflow as tf
 import numpy as np
 import tf_util
-import roboschool
 import gym
 import load_policy
 
@@ -42,19 +41,20 @@ def main():
 
         def run_exp(func, returns, observations, actions, bc=False):
             for i in range(args.num_rollouts):
-                #print('iter', i)
+                # print('iter', i)
                 obs = env.reset()
                 done = False
                 totalr = 0.
                 steps = 0
                 while not done:
+                    observations.append(obs)
                     action = func(obs[None, :])
                     #if steps % 1000 == 0:
                     #    print(type(action))
-                    observations.append(obs)
                     obs, r, done, _ = env.step(action)
                     if bc:
                         action = policy_fn(obs[None, :])
+                        # obs, r, done, _ = env.step(action)
                     actions.append(action)
                     totalr += r
                     steps += 1
@@ -66,7 +66,7 @@ def main():
                         break
                 returns.append(totalr)
 
-            print('returns', returns)
+            # print('returns', returns)
             print('mean return', np.mean(returns))
             print('std of return', np.std(returns))
 
@@ -83,7 +83,7 @@ def main():
         actions_dims = actions1.shape[1] * actions1.shape[2]
         expert_data['actions'] = np.reshape(expert_data['actions'], (actions_size, actions_dims))
 
-        #
+        # setting up models
         print(expert_data['observations'].shape, expert_data['actions'].shape)
         inputs = tf_util.get_placeholder('inputs', tf.float32,
                                          [None, expert_data['observations'].shape[1]])
@@ -91,9 +91,9 @@ def main():
 
         # models
         name = args.envname
-        d1 = tf_util.dense(inputs, 8, 'd1')
-        d2 = tf_util.dropout(d1, 0.8)
-        d3 = tf_util.wndense(d2, 8, 'd2')
+        d1 = tf_util.dense(inputs, 32, 'd1')
+        d2 = tf_util.dropout(d1, 0.9)
+        d3 = tf_util.wndense(d2, 32, 'd2')
         pred = tf_util.densenobias(d3, actions_dims, 'output')
 
         #print(type(expert_data['actions']), type(pred))
@@ -105,29 +105,39 @@ def main():
         tf_util.initialize()
 
         # grid search parameters
-        for i in range(args.num_rollouts):
-            ls = 0
-            batch_size = int(actions_size / 20)
-            batch_num = int(actions_size / batch_size)
-            for j in range(batch_num):
-                start = batch_num * j
-                end = start + batch_size
-                op_eval, ls_current = tf_util.eval([optimizer, loss],
-                                                   {inputs: expert_data['observations'][start:end],
-                                                    labels: expert_data['actions'][start:end]})
-                # print('batch ', j, ls_current)
-                ls += ls_current
-            #print('iter ', i, ls.shape)
+        def train_model(x, y):
+            for i in range(args.num_rollouts):
+                ls = 0
+                batch_size = int(actions_size / 4)
+                batch_num = int(actions_size / batch_size)
+                for j in range(batch_num):
+                    start = batch_num * j
+                    end = start + batch_size
+                    op_eval, ls_current = tf_util.eval([optimizer, loss],
+                                                       {inputs: x[start:end],
+                                                        labels: y[start:end]})
+                    # print('batch ', j, ls_current)
+                    ls += ls_current
+                #print('iter ', i, ls.shape)
 
         def model_eval(obs):
             p = tf_util.eval([pred], {inputs: obs})
             return np.array(p)
 
         print("running behaviour cloning")
+        train_model(expert_data['observations'], expert_data['actions'])
         run_exp(model_eval, [], [], [])
 
         print("running DAgger")
-        run_exp(model_eval, [], observations0, actions0, True)
+        # for i in range(args.num_rollouts):
+        for i in range(5):
+            print(len(observations0), len(actions0))
+            run_exp(model_eval, [], observations0, actions0, True)
+            expert_data = {'observations': np.array(observations0),
+                           'actions': np.array(actions0)}
+            expert_data['actions'] = np.reshape(expert_data['actions'],
+                                                (expert_data['actions'].shape[0], actions_dims))
+            train_model(expert_data['observations'], expert_data['actions'])
 
 
 if __name__ == '__main__':
