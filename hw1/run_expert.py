@@ -91,15 +91,16 @@ def main():
 
         # models
         name = args.envname
-        d1 = tf_util.dense(inputs, 32, 'd1')
-        d2 = tf_util.dropout(d1, 0.9)
-        d3 = tf_util.wndense(d2, 32, 'd2')
+        d1 = tf_util.dense(inputs, 128, 'd1')
+        d2 = tf_util.dense(inputs, 128, 'd2')
+        # d2 = tf_util.dropout(d1, 0.95)
+        d3 = tf_util.wndense(d1, 128, 'd3')
         pred = tf_util.densenobias(d3, actions_dims, 'output')
 
         #print(type(expert_data['actions']), type(pred))
         loss_func = tf.losses.mean_squared_error(labels, pred)
         loss = tf.reduce_mean(loss_func)
-        optimizer = tf.train.RMSPropOptimizer(0.1).minimize(loss)
+        optimizer = tf.train.AdamOptimizer().minimize(loss)
 
         # evaluations
         tf_util.initialize()
@@ -129,8 +130,8 @@ def main():
         run_exp(model_eval, [], [], [])
 
         print("running DAgger")
-        # for i in range(args.num_rollouts):
-        for i in range(5):
+        for i in range(args.num_rollouts):
+        # for i in range(10):
             print(len(observations0), len(actions0))
             run_exp(model_eval, [], observations0, actions0, True)
             expert_data = {'observations': np.array(observations0),
