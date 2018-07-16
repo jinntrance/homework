@@ -1,6 +1,8 @@
 import numpy as np
 import tensorflow as tf
 import gym
+from tensorflow.contrib.distributions import MultivariateNormalDiag
+
 import logz
 import scipy.signal
 import os
@@ -40,7 +42,7 @@ def build_mlp(
         for i in range(1, n_layers):
             d1 = tf.layers.dense(d1, size, activation)
 
-        tf.layers.dense(d1, output_size, output_activation)
+        return tf.layers.dense(d1, output_size, output_activation)
 
 
 def pathlength(path):
@@ -127,7 +129,7 @@ def train_PG(exp_name='',
         sy_ac_na = tf.placeholder(shape=[None, ac_dim], name="ac", dtype=tf.float32)
 
         # Define a placeholder for advantages
-    sy_adv_n = TODO
+    sy_adv_n = tf.placeholder(shape=[None], name='advantages', dtype=tf.float32)
 
     # ========================================================================================#
     #                           ----------SECTION 4----------
@@ -170,23 +172,23 @@ def train_PG(exp_name='',
 
     if discrete:
         # YOUR_CODE_HERE
-        sy_logits_na = TODO
-        sy_sampled_ac = TODO  # Hint: Use the tf.multinomial op
-        sy_logprob_n = TODO
+        sy_logits_na = build_mlp(sy_ob_no, ac_dim, "discrete", n_layers, size)
+        sy_sampled_ac = tf.squeeze(tf.multinomial(sy_logits_na, [None]))  # Hint: Use the tf.multinomial op
+        sy_logprob_n = tf.nn.softmax_cross_entropy_with_logits(sy_ac_na, sy_logits_na)
 
     else:
         # YOUR_CODE_HERE
-        sy_mean = TODO
-        sy_logstd = TODO  # logstd should just be a trainable variable, not a network output.
-        sy_sampled_ac = TODO
-        sy_logprob_n = TODO  # Hint: Use the log probability under a multivariate gaussian. 
+        sy_mean = build_mlp(sy_ob_no, ac_dim, "continuous", n_layers, size)
+        sy_logstd = tf.get_variable("sy_logstd", shape=[ac_dim])  # logstd should just be a trainable variable, not a network output.
+        sy_sampled_ac = sy_mean + tf.multiply(tf.exp(sy_logstd), tf.random_normal(sy_mean))
+        sy_logprob_n = - MultivariateNormalDiag(sy_mean, tf.exp(sy_logstd)).log_prob(sy_ac_na)  # Hint: Use the log probability under a multivariate gaussian.
 
     # ========================================================================================#
     #                           ----------SECTION 4----------
     # Loss Function and Training Operation
     # ========================================================================================#
 
-    loss = TODO  # Loss function that we'll differentiate to get the policy gradient.
+    loss = tf.reduce_mean(tf.multiply(sy_logprob_n, sy_adv_n))  # Loss function that we'll differentiate to get the policy gradient.
     update_op = tf.train.AdamOptimizer(learning_rate).minimize(loss)
 
     # ========================================================================================#
@@ -204,7 +206,9 @@ def train_PG(exp_name='',
         # Define placeholders for targets, a loss function and an update op for fitting a 
         # neural network baseline. These will be used to fit the neural network baseline. 
         # YOUR_CODE_HERE
-        baseline_update_op = TODO
+        baseline_targets = tf.get_variable(shape=[None], dtype=tf.float32)
+        baseline_loss = tf.losses.mean_squared_error(baseline_prediction, baseline_targets)
+        baseline_update_op = tf.train.AdamOptimizer(learning_rate).minimize(baseline_loss)
 
     # ========================================================================================#
     # Tensorflow Engineering: Config, Session, Variable initialization
@@ -314,7 +318,19 @@ def train_PG(exp_name='',
         # ====================================================================================#
 
         # YOUR_CODE_HERE
-        q_n = TODO
+        q_n = []
+        for path in paths:
+            rewards = path["reward"]
+            if not reward_to_go:
+                discounted_sum = sum([(gamma ** i) * rewards[i] for i in range(len(rewards))])
+                q_n.append(discounted_sum)
+            else:
+                r_t = []
+                later_reward = 0
+                for i in range(len(rewards)):
+                    later_reward = rewards[-1-i] + gamma * later_reward
+                    r_t.append(later_reward)
+                q_n.append(reversed(r_t))
 
         # ====================================================================================#
         #                           ----------SECTION 5----------
@@ -330,7 +346,7 @@ def train_PG(exp_name='',
             # (mean and std) of the current or previous batch of Q-values. (Goes with Hint
             # #bl2 below.)
 
-            b_n = TODO
+            b_n = sess.run(baseline_prediction, feed_dict={sy_ob_no:ob_no})
             adv_n = q_n - b_n
         else:
             adv_n = q_n.copy()
