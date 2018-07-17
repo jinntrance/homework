@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import gym
+from sklearn import preprocessing
 from tensorflow.contrib.distributions import MultivariateNormalDiag
 
 import logz
@@ -173,8 +174,8 @@ def train_PG(exp_name='',
     if discrete:
         # YOUR_CODE_HERE
         sy_logits_na = build_mlp(sy_ob_no, ac_dim, "discrete", n_layers, size)
-        sy_sampled_ac = tf.squeeze(tf.multinomial(sy_logits_na, [None]))  # Hint: Use the tf.multinomial op
-        sy_logprob_n = tf.nn.softmax_cross_entropy_with_logits(sy_ac_na, sy_logits_na)
+        sy_sampled_ac = tf.squeeze(tf.multinomial(sy_logits_na, 1), axis=[1])  # Hint: Use the tf.multinomial op
+        sy_logprob_n = tf.nn.softmax_cross_entropy_with_logits(labels=sy_ac_na, logits=sy_logits_na)
 
     else:
         # YOUR_CODE_HERE
@@ -337,6 +338,11 @@ def train_PG(exp_name='',
         # Computing Baselines
         # ====================================================================================#
 
+
+        def normalize(data):
+            scale = preprocessing.StandardScaler().fit(data)
+            return scale.transform(data)
+
         if nn_baseline:
             # If nn_baseline is True, use your neural network to predict reward-to-go
             # at each timestep for each trajectory, and save the result in a variable 'b_n'
@@ -347,7 +353,7 @@ def train_PG(exp_name='',
             # #bl2 below.)
 
             b_n = sess.run(baseline_prediction, feed_dict={sy_ob_no:ob_no})
-            adv_n = q_n - b_n
+            adv_n = q_n - (normalize(b_n) * np.std(q_n) + np.mean(q_n))
         else:
             adv_n = q_n.copy()
 
@@ -360,7 +366,7 @@ def train_PG(exp_name='',
             # On the next line, implement a trick which is known empirically to reduce variance
             # in policy gradient methods: normalize adv_n to have mean zero and std=1. 
             # YOUR_CODE_HERE
-            pass
+            normalize(adv_n)
 
         # ====================================================================================#
         #                           ----------SECTION 5----------
@@ -378,6 +384,7 @@ def train_PG(exp_name='',
             # targets to have mean zero and std=1. (Goes with Hint #bl1 above.)
 
             # YOUR_CODE_HERE
+            sess.run(baseline_update_op, feed_dict={sy_ob_no:ob_no,baseline_targets: normalize(q_n)})
             pass
 
         # ====================================================================================#
